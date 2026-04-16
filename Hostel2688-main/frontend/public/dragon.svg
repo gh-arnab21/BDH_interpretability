@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <linearGradient id="dragonGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#A78BFA"/>
+    </linearGradient>
+  </defs>
+  <!-- Dragon body -->
+  <path d="M50 20 C30 20 15 35 15 55 C15 75 30 85 50 85 C70 85 85 75 85 55 C85 35 70 20 50 20" 
+        fill="url(#dragonGrad)" opacity="0.9"/>
+  <!-- Dragon head -->
+  <ellipse cx="50" cy="35" rx="20" ry="15" fill="url(#dragonGrad)"/>
+  <!-- Eyes -->
+  <circle cx="42" cy="32" r="4" fill="white"/>
+  <circle cx="58" cy="32" r="4" fill="white"/>
+  <circle cx="43" cy="33" r="2" fill="#1a1a2e"/>
+  <circle cx="59" cy="33" r="2" fill="#1a1a2e"/>
+  <!-- Horns -->
+  <path d="M35 25 L30 10 L38 22" fill="#A78BFA"/>
+  <path d="M65 25 L70 10 L62 22" fill="#A78BFA"/>
+  <!-- Wings (representing sparsity) -->
+  <path d="M20 50 Q5 40 10 60 Q15 55 20 60 Q25 55 25 55" fill="#A78BFA" opacity="0.7"/>
+  <path d="M80 50 Q95 40 90 60 Q85 55 80 60 Q75 55 75 55" fill="#A78BFA" opacity="0.7"/>
+  <!-- Sparse activation dots on body -->
+  <circle cx="35" cy="55" r="2" fill="white" opacity="0.8"/>
+  <circle cx="50" cy="60" r="2" fill="white" opacity="0.8"/>
+  <circle cx="65" cy="55" r="2" fill="white" opacity="0.8"/>
+  <circle cx="45" cy="70" r="2" fill="white" opacity="0.8"/>
+  <circle cx="55" cy="70" r="2" fill="white" opacity="0.8"/>
+</svg>

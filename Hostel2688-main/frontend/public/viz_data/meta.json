@@ -1,0 +1,21 @@
+{
+  "config": {
+    "n_layer": 6,
+    "n_embd": 192,
+    "n_head": 4,
+    "N": 3072,
+    "N_total": 12288
+  },
+  "n_params": 7962624,
+  "iteration": 50000,
+  "losses": {
+    "train": 0.6483144700527191,
+    "val": 0.670272696018219
+  },
+  "equations": {
+    "x_sparse": "x_{t,l} = ReLU(D_x \u00b7 LN(v*_{t,l-1}))",
+    "attention": "a*_{t,l} = CausalAttn(Q=x, K=x, V=v*)",
+    "y_gated": "y_{t,l} = ReLU(D_y \u00b7 a*_{t,l}) \u2299 x_{t,l}",
+    "update": "v*_{t,l} = v*_{t,l-1} + E \u00b7 y_{t,l}"
+  }
+}

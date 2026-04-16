@@ -1,0 +1,265 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════════════
+   NEURAL OBSERVATORY — Base Theme
+   Atmospheric dark with depth, noise, vignette
+   ═══════════════════════════════════════════════════════════════ */
+@layer base {
+  :root {
+    --obs-bg: #070D12;
+    --obs-surface: #0B1216;
+    --obs-glow: #00C896;
+    --obs-secondary: #2A7FFF;
+    --obs-border: rgba(255, 255, 255, 0.06);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background: var(--obs-bg);
+    color: #E2E8F0;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  * {
+    border-color: var(--obs-border);
+  }
+
+  /* Scrollbar — subtle, atmospheric */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--obs-bg);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 99px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.14);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENT CLASSES
+   ═══════════════════════════════════════════════════════════════ */
+@layer components {
+  /* ---- NOISE OVERLAY (applied to page wrappers) ---- */
+  .noise-overlay::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* ---- VIGNETTE ---- */
+  .vignette::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9998;
+    background: radial-gradient(ellipse 70% 60% at 50% 50%, transparent 50%, rgba(7,13,18,0.6) 100%);
+  }
+
+  /* ---- Card tiers ---- */
+  /* Tier 1 — Surface: static info, metrics, headers */
+  .card-surface {
+    @apply rounded-xl backdrop-blur-sm;
+    background: rgba(255, 255, 255, 0.015);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  /* Tier 2 — Interactive: probes, controls, live elements */
+  .card-interactive {
+    @apply rounded-xl backdrop-blur-sm transition-all duration-300;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .card-interactive:hover {
+    border-color: rgba(0, 200, 150, 0.18);
+    background: rgba(255, 255, 255, 0.035);
+    box-shadow: 0 8px 32px rgba(0, 200, 150, 0.06), 0 0 0 1px rgba(0, 200, 150, 0.05);
+    transform: translateY(-4px);
+  }
+
+  /* Tier 3 — Focus / Inspector */
+  .card-focus {
+    @apply rounded-xl backdrop-blur-md;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(0, 200, 150, 0.15);
+    box-shadow: 0 0 40px rgba(0, 200, 150, 0.07);
+  }
+
+  /* ---- Legacy glass-card mapped to Tier 2 ---- */
+  .glass-card {
+    @apply card-interactive;
+  }
+
+  /* ---- Glow accents ---- */
+  .glow-accent {
+    border-color: rgba(0, 200, 150, 0.2);
+    box-shadow: 0 0 20px rgba(0, 200, 150, 0.06);
+  }
+  .glow-success {
+    border-color: rgba(16, 185, 129, 0.2);
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.06);
+  }
+
+  /* ---- Neuron visualization ---- */
+  .neuron {
+    @apply rounded-full transition-all duration-300;
+  }
+  .neuron-active {
+    background: var(--obs-glow);
+    box-shadow: 0 0 8px rgba(0, 200, 150, 0.4);
+  }
+  .neuron-inactive {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  /* ---- SVG data flow ---- */
+  .path-flow {
+    stroke-dasharray: 6 12;
+    animation: dashFlow 2s linear infinite;
+  }
+  @keyframes dashFlow {
+    to {
+      stroke-dashoffset: -100;
+    }
+  }
+  .path-flow-glow {
+    filter: drop-shadow(0 0 4px rgba(0, 200, 150, 0.4));
+  }
+
+  /* ---- Pulse ---- */
+  .pulse-active {
+    animation: pulseActive 3s ease-in-out infinite;
+  }
+  @keyframes pulseActive {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.85; }
+  }
+
+  /* ---- Accent text ---- */
+  .gradient-text {
+    @apply text-[#00C896];
+  }
+
+  /* ---- Buttons ---- */
+  .btn-primary {
+    @apply px-4 py-2 font-medium rounded-lg transition-all duration-200;
+    background: var(--obs-glow);
+    color: #070D12;
+  }
+  .btn-primary:hover {
+    background: #34D399;
+    box-shadow: 0 0 24px rgba(0, 200, 150, 0.2);
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 font-medium rounded-lg transition-all duration-200;
+    background: rgba(255, 255, 255, 0.04);
+    color: #E2E8F0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+
+  /* ---- Input ---- */
+  .input-field {
+    @apply w-full px-4 py-3 rounded-lg transition-all duration-200;
+    @apply placeholder-[#4A5568];
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #E2E8F0;
+  }
+  .input-field:focus {
+    outline: none;
+    border-color: rgba(0, 200, 150, 0.4);
+    box-shadow: 0 0 0 3px rgba(0, 200, 150, 0.08);
+  }
+
+  /* ---- Tabs ---- */
+  .tab {
+    @apply px-4 py-2 transition-all duration-200;
+    color: #8B95A5;
+    border-bottom: 2px solid transparent;
+  }
+  .tab:hover {
+    color: #E2E8F0;
+  }
+  .tab-active {
+    color: var(--obs-glow);
+    border-color: var(--obs-glow);
+  }
+
+  /* ---- Tooltip ---- */
+  .tooltip {
+    @apply absolute z-50 px-3 py-2 text-sm rounded-lg shadow-xl;
+    background: var(--obs-surface);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    @apply opacity-0 invisible transition-all duration-200;
+  }
+  .tooltip-trigger:hover .tooltip {
+    @apply opacity-100 visible;
+  }
+
+  /* ---- Skeleton loader ---- */
+  .skeleton {
+    @apply rounded-lg animate-pulse;
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.03) 25%,
+      rgba(255, 255, 255, 0.06) 50%,
+      rgba(255, 255, 255, 0.03) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  }
+  @keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   UTILITY ANIMATIONS
+   ═══════════════════════════════════════════════════════════════ */
+@layer utilities {
+  .animate-fade-in {
+    animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(12px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .animate-slide-in {
+    animation: slideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-20px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  /* Stagger delays */
+  .stagger-1 { animation-delay: 0.05s; }
+  .stagger-2 { animation-delay: 0.10s; }
+  .stagger-3 { animation-delay: 0.15s; }
+  .stagger-4 { animation-delay: 0.20s; }
+  .stagger-5 { animation-delay: 0.25s; }
+}

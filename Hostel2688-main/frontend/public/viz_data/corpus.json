@@ -1,0 +1,92 @@
+[
+  {
+    "idx": 0,
+    "text": "<F:en>The price was fifty euros and thirty pounds<T:fr>Le prix \u00e9tait de cinquante euros et trente livres",
+    "n_tokens": 105,
+    "mean_sparsity": 0.9502
+  },
+  {
+    "idx": 1,
+    "text": "<F:en>The dollar strengthened against the yen today<T:fr>Le dollar s'est renforc\u00e9 face au yen aujourd'hui",
+    "n_tokens": 106,
+    "mean_sparsity": 0.9485
+  },
+  {
+    "idx": 2,
+    "text": "<F:en>Converting francs to marks was expensive<T:fr>Convertir les francs en marks \u00e9tait co\u00fbteux",
+    "n_tokens": 97,
+    "mean_sparsity": 0.9499
+  },
+  {
+    "idx": 3,
+    "text": "<F:en>Germany and France signed the bilateral treaty<T:fr>L'Allemagne et la France ont sign\u00e9 le trait\u00e9 bilat\u00e9ral",
+    "n_tokens": 115,
+    "mean_sparsity": 0.9489
+  },
+  {
+    "idx": 4,
+    "text": "<F:en>Sweden and Finland proposed a new allocation<T:fr>La Su\u00e8de et la Finlande ont propos\u00e9 une nouvelle r\u00e9partition",
+    "n_tokens": 119,
+    "mean_sparsity": 0.9486
+  },
+  {
+    "idx": 5,
+    "text": "<F:en>The delegation from Portugal arrived in Brussels<T:fr>La d\u00e9l\u00e9gation du Portugal est arriv\u00e9e \u00e0 Bruxelles",
+    "n_tokens": 113,
+    "mean_sparsity": 0.9488
+  },
+  {
+    "idx": 6,
+    "text": "<F:en>The European Parliament voted on this resolution<T:fr>Le parlement europ\u00e9en a vot\u00e9 cette r\u00e9solution",
+    "n_tokens": 108,
+    "mean_sparsity": 0.9464
+  },
+  {
+    "idx": 7,
+    "text": "<F:en>The Commission presented the annual budget report<T:fr>La Commission a pr\u00e9sent\u00e9 le rapport budg\u00e9taire annuel",
+    "n_tokens": 117,
+    "mean_sparsity": 0.9468
+  },
+  {
+    "idx": 8,
+    "text": "<F:en>The Council of Ministers reached a compromise<T:fr>Le Conseil des ministres est parvenu \u00e0 un compromis",
+    "n_tokens": 109,
+    "mean_sparsity": 0.9483
+  },
+  {
+    "idx": 9,
+    "text": "<F:en>What measures has the Commission taken to address this issue?<T:fr>Quelles mesures la Commission a-t-elle prises?",
+    "n_tokens": 119,
+    "mean_sparsity": 0.9481
+  },
+  {
+    "idx": 10,
+    "text": "<F:en>The amendment proposed by Mr Ferber was adopted<T:fr>L'amendement propos\u00e9 par M. Ferber a \u00e9t\u00e9 adopt\u00e9",
+    "n_tokens": 110,
+    "mean_sparsity": 0.9491
+  },
+  {
+    "idx": 11,
+    "text": "<F:en>The budget was discussed. The budget was approved. The budget will be implemented.<T:fr>Le budget a \u00e9t\u00e9 discut\u00e9. Le budget a \u00e9t\u00e9 approuv\u00e9. Le budget sera mis en \u0153uvre.",
+    "n_tokens": 180,
+    "mean_sparsity": 0.9508
+  },
+  {
+    "idx": 12,
+    "text": "<F:en>Good morning<T:fr>Bonjour",
+    "n_tokens": 31,
+    "mean_sparsity": 0.9473
+  },
+  {
+    "idx": 13,
+    "text": "<F:en>Thank you very much<T:fr>Merci beaucoup",
+    "n_tokens": 45,
+    "mean_sparsity": 0.9465
+  },
+  {
+    "idx": 14,
+    "text": "<F:en>The British pound fell after the vote in London<T:fr>La livre sterling a chut\u00e9 apr\u00e8s le vote \u00e0 Londres",
+    "n_tokens": 111,
+    "mean_sparsity": 0.9497
+  }
+]

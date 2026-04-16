@@ -1,0 +1,1074 @@
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import {
+  Play,
+  Pause,
+  RotateCcw,
+  Loader2,
+  AlertCircle,
+  Send,
+  Zap,
+  Activity,
+  Eye,
+  ChevronDown,
+  ChevronUp,
+  Info,
+  SkipForward,
+  Square,
+  Brain,
+} from "lucide-react";
+import ForceGraph3D from "react-force-graph-3d";
+import { api } from "../utils/api";
+
+// ─── Types ─────────────────────────────────────────────────────────────
+interface ClusterMeta {
+  cluster_id: number;
+  neuron_count: number;
+  avg_out_degree: number;
+  avg_in_degree: number;
+  internal_edges: number;
+  internal_weight: number;
+  hub_neurons: Array<{ neuron: number; degree: number }>;
+  label: string | null;
+  label_confidence?: number;
+  top_trigger_words?: string[];
+}
+interface ClusterData {
+  n_neurons: number;
+  n_display_nodes: number;
+  n_display_edges: number;
+  n_total_edges: number;
+  num_clusters: number;
+  modularity: number;
+  beta: number;
+  beta_effective?: number;
+  nodes: Array<{
+    id: number;
+    cluster: number;
+    degree: number;
+    is_hub: boolean;
+  }>;
+  edges: Array<{
+    source: number;
+    target: number;
+    weight: number;
+    same_cluster: boolean;
+  }>;
+  clusters: ClusterMeta[];
+  histogram: Array<{ x: number; y: number }>;
+}
+interface TokenAct {
+  token_idx: number;
+  byte: number;
+  char: string;
+  cluster_activations: Array<{
+    cluster_id: number;
+    activation: number;
+    normalized: number;
+    active_neurons: number;
+  }>;
+  node_activations?: Record<string, number>;
+}
+interface ActResult {
+  input_chars: string[];
+  num_tokens: number;
+  per_token: TokenAct[];
+  cumulative_cluster_activations: Array<{
+    cluster_id: number;
+    normalized: number;
+  }>;
+  node_activations: Record<string, number>;
+}
+
+// ─── Colors ────────────────────────────────────────────────────────────
+const CC = [
+  "#3a3f4b",
+  "#8B5CF6",
+  "#3B82F6",
+  "#10B981",
+  "#F59E0B",
+  "#EF4444",
+  "#EC4899",
+  "#06B6D4",
+  "#84CC16",
+  "#F97316",
+  "#6366F1",
+  "#14B8A6",
+  "#E879F9",
+  "#FB923C",
+  "#A78BFA",
+  "#34D399",
+  "#FBBF24",
+  "#F472B6",
+  "#22D3EE",
+  "#A3E635",
+];
+const CC_DIM = CC.map((c) => {
+  const [r, g, b] = [1, 3, 5].map((i) =>
+    Math.round(parseInt(c.slice(i, i + 2), 16) * 0.08),
+  );
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+});
+const CC_BRIGHT = CC.map((c) => {
+  const [r, g, b] = [1, 3, 5].map((i) =>
+    Math.min(255, Math.round(parseInt(c.slice(i, i + 2), 16) * 1.5)),
+  );
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+});
+const ci = (cid: number) => (cid <= 0 ? 0 : ((cid - 1) % (CC.length - 1)) + 1);
+
+// ─── Histogram ─────────────────────────────────────────────────────────
+function Hist({
+  data,
+  beta,
+}: {
+  data: Array<{ x: number; y: number }>;
+  beta: number;
+}) {
+  if (!data?.length) return null;
+  const my = Math.max(...data.map((d) => d.y), 1);
+  const mx = Math.max(...data.map((d) => d.x)),
+    mn = Math.min(...data.map((d) => d.x));
+  const bp = mx > mn ? ((beta - mn) / (mx - mn)) * 100 : 50;
+  return (
+    <div className="mt-1.5">
+      <div className="text-[9px] text-gray-600 mb-0.5">
+        G* weight distribution
+      </div>
+      <div className="relative h-8 bg-gray-900/40 rounded overflow-hidden border border-gray-800/40">
+        <div className="absolute inset-0 flex items-end">
+          {data.map((d, i) => (
+            <div
+              key={i}
+              className="flex-1"
+              style={{
+                height: `${(d.y / my) * 100}%`,
+                backgroundColor:
+                  d.x >= beta ? "rgba(139,92,246,0.5)" : "rgba(75,85,99,0.3)",
+              }}
+            />
+          ))}
+        </div>
+        <div
+          className="absolute top-0 bottom-0 w-px bg-red-500/70"
+          style={{ left: `${Math.min(Math.max(bp, 0), 100)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── Cluster Pill ──────────────────────────────────────────────────────
+function Pill({
+  c,
+  act,
+  blink,
+  open,
+  dimmed,
+  selected,
+  onClick,
+}: {
+  c: ClusterMeta;
+  act: number;
+  blink: boolean;
+  open: boolean;
+  dimmed: boolean;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const color = CC[ci(c.cluster_id)];
+  const effectiveAct = dimmed ? 0 : act;
+  const effectiveBlink = dimmed ? false : blink;
+  const isGlowing = selected || effectiveBlink || effectiveAct > 0.3;
+  return (
+    <div
+      onClick={onClick}
+      className="cursor-pointer rounded-lg border transition-all duration-500"
+      style={{
+        borderColor: isGlowing ? color : "#1f2937",
+        backgroundColor: isGlowing
+          ? `${color}18`
+          : dimmed
+            ? "#0a0a0f"
+            : "#111827",
+        boxShadow: selected
+          ? `0 0 20px ${color}60, 0 0 40px ${color}20`
+          : effectiveBlink
+            ? `0 0 14px ${color}50`
+            : effectiveAct > 0.3
+              ? `0 0 8px ${color}30`
+              : "none",
+        opacity: dimmed ? 0.15 : 1,
+        transform: isGlowing ? "scale(1.02)" : "scale(1)",
+      }}
+    >
+      <div className="p-1.5 flex items-center gap-1.5">
+        <div className="relative flex-shrink-0">
+          <div
+            className="w-2.5 h-2.5 rounded-full"
+            style={{ backgroundColor: dimmed ? "#1a1a2e" : color }}
+          />
+          {(effectiveBlink || selected) && (
+            <div
+              className="absolute inset-0 rounded-full animate-ping"
+              style={{ backgroundColor: color, opacity: 0.35 }}
+            />
+          )}
+        </div>
+        <span
+          className={`text-[10px] font-medium truncate flex-1 ${dimmed ? "text-gray-700" : "text-gray-300"}`}
+        >
+          {c.label || `Cluster ${c.cluster_id}`}
+        </span>
+        <span className="text-[8px] text-gray-600">{c.neuron_count}n</span>
+        {effectiveAct > 0.05 && (
+          <span className="text-[9px] font-mono" style={{ color }}>
+            {(effectiveAct * 100) | 0}%
+          </span>
+        )}
+        {open ? (
+          <ChevronUp size={9} className="text-gray-600" />
+        ) : (
+          <ChevronDown size={9} className="text-gray-600" />
+        )}
+      </div>
+      {effectiveAct > 0.05 && (
+        <div className="mx-1.5 mb-1 h-0.5 rounded-full bg-gray-800 overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{ backgroundColor: color, width: `${effectiveAct * 100}%` }}
+          />
+        </div>
+      )}
+      {open && !dimmed && (
+        <div className="px-1.5 pb-1.5 space-y-1">
+          <div className="grid grid-cols-2 gap-1 text-[8px]">
+            <div className="p-1 bg-gray-900/40 rounded">
+              <span className="text-gray-600">Out° </span>
+              {c.avg_out_degree}
+            </div>
+            <div className="p-1 bg-gray-900/40 rounded">
+              <span className="text-gray-600">In° </span>
+              {c.avg_in_degree}
+            </div>
+          </div>
+          {c.label_confidence != null && c.label_confidence > 0 && (
+            <div className="text-[7px] text-gray-500">
+              Confidence: {(c.label_confidence * 100).toFixed(0)}%
+            </div>
+          )}
+          {c.hub_neurons.length > 0 && (
+            <div className="p-1 bg-gray-900/40 rounded flex gap-0.5 flex-wrap text-[8px]">
+              {c.hub_neurons.map((h) => (
+                <span
+                  key={h.neuron}
+                  className="px-0.5 rounded bg-gray-800 font-mono text-gray-500"
+                >
+                  #{h.neuron}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// MAIN
+// ═══════════════════════════════════════════════════════════════════════
+export function GraphPage() {
+  const [cd, setCd] = useState<ClusterData | null>(null);
+  const [ar, setAr] = useState<ActResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [head, setHead] = useState(0);
+  const [beta, setBeta] = useState(0.02);
+  const [layer, setLayer] = useState(-1);
+  const [text, setText] = useState("");
+  const [edges, setEdges] = useState(true);
+  const [expCl, setExpCl] = useState<number | null>(null);
+
+  // hlCl = cluster highlighted by click (non-inference mode)
+  const [hlCl, setHlCl] = useState<number | null>(null);
+
+  // Playback
+  const [pIdx, setPIdx] = useState(-1);
+  const [playing, setPlaying] = useState(false);
+  const pTimer = useRef<any>(null);
+  const gRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dims, setDims] = useState({ width: 800, height: 600 });
+  const bTimer = useRef<any>(null);
+
+  const PLAYBACK_DELAY = 800; // ms per token — enough to observe
+
+  // ── Load clusters ──
+  const load = useCallback(async (h: number, b: number) => {
+    setLoading(true);
+    setError(null);
+    setAr(null);
+    setPIdx(-1);
+    setPlaying(false);
+    setHlCl(null);
+    try {
+      const r = await api.get("/graph/clusters/french", {
+        params: { head: h, beta: b, max_nodes: 800 },
+        timeout: 60000,
+      });
+      setCd(r.data);
+      hasZoomed.current = false;
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load(head, beta);
+  }, [head]); // eslint-disable-line
+
+  // ── Container resize ──
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      if (width > 0 && height > 0)
+        setDims({ width: Math.round(width), height: Math.round(height) });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // ── Auto-fit camera ONCE to show full brain ──
+  const hasZoomed = useRef(false);
+  const doZoomToFit = useCallback(() => {
+    if (hasZoomed.current) return;
+    const fg = gRef.current;
+    if (!fg) return;
+    fg.zoomToFit(800, 80); // generous padding to show entire brain
+    hasZoomed.current = true;
+  }, []);
+  const handleEngineStop = useCallback(() => {
+    doZoomToFit();
+  }, [doZoomToFit]);
+  useEffect(() => {
+    if (!cd || hasZoomed.current) return;
+    const t = setTimeout(() => doZoomToFit(), 2500);
+    return () => clearTimeout(t);
+  }, [cd, doZoomToFit]);
+
+  // ── Beta debounce ──
+  useEffect(() => {
+    if (bTimer.current) clearTimeout(bTimer.current);
+    bTimer.current = setTimeout(() => load(head, beta), 700);
+    return () => clearTimeout(bTimer.current);
+  }, [beta]); // eslint-disable-line
+
+  // ── Inference: run text, then start auto-playback ──
+  const run = useCallback(async () => {
+    if (!text.trim() || !cd) return;
+    setActivating(true);
+    setPIdx(-1);
+    setPlaying(false);
+    setHlCl(null);
+    try {
+      const r = await api.post("/graph/activate", {
+        text,
+        model_name: "french",
+        head,
+        layer,
+      });
+      setAr(r.data);
+      // Auto-start playback
+      setPIdx(0);
+      setPlaying(true);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || "Failed");
+    } finally {
+      setActivating(false);
+    }
+  }, [text, head, layer, cd]);
+
+  // ── Auto-play timer — advances token index automatically ──
+  useEffect(() => {
+    if (pTimer.current) clearInterval(pTimer.current);
+    if (playing && ar && pIdx >= 0) {
+      pTimer.current = setInterval(() => {
+        setPIdx((p) => {
+          if (p >= ar.num_tokens - 1) {
+            setPlaying(false);
+            return p;
+          }
+          return p + 1;
+        });
+      }, PLAYBACK_DELAY);
+    }
+    return () => {
+      if (pTimer.current) clearInterval(pTimer.current);
+    };
+  }, [playing, ar]); // eslint-disable-line
+
+  // ── Current token data ──
+  const curTok =
+    pIdx >= 0 && ar && pIdx < ar.per_token.length ? ar.per_token[pIdx] : null;
+  const curMap: Record<number, number> = {};
+  const blinkIds = new Set<number>();
+  if (curTok) {
+    for (const ca of curTok.cluster_activations) {
+      curMap[ca.cluster_id] = ca.normalized;
+      if (ca.normalized > 0.25) blinkIds.add(ca.cluster_id);
+    }
+  }
+
+  // ── Node → cluster lookup ──
+  const nodeClMap = useMemo(() => {
+    const m: Record<number, number> = {};
+    if (cd) for (const n of cd.nodes) m[n.id] = n.cluster;
+    return m;
+  }, [cd]);
+
+  // ── Per-node activation for current token ──
+  const nodeActMap = useMemo(() => {
+    const m: Record<number, number> = {};
+    if (!curTok || !cd) return m;
+    const na = curTok.node_activations;
+    if (na && Object.keys(na).length > 0) {
+      for (const [nid, val] of Object.entries(na)) m[Number(nid)] = val;
+    } else {
+      const clAct: Record<number, number> = {};
+      for (const ca of curTok.cluster_activations)
+        clAct[ca.cluster_id] = ca.normalized;
+      for (const n of cd.nodes) {
+        const a = clAct[n.cluster] ?? 0;
+        if (a > 0.05) m[n.id] = a;
+      }
+    }
+    return m;
+  }, [curTok, cd]);
+
+  // ── Active clusters for current token ──
+  const activeClusters = useMemo(() => {
+    const s = new Set<number>();
+    if (!curTok || !cd) return s;
+    const na = curTok.node_activations;
+    if (na && Object.keys(na).length > 0) {
+      for (const [nid] of Object.entries(na)) {
+        const cl = nodeClMap[Number(nid)];
+        if (cl !== undefined && cl > 0) s.add(cl);
+      }
+    } else {
+      for (const ca of curTok.cluster_activations) {
+        if (ca.normalized > 0.1) s.add(ca.cluster_id);
+      }
+    }
+    return s;
+  }, [curTok, cd, nodeClMap]);
+
+  const isPlayback = pIdx >= 0 && !!curTok;
+
+  // ── Cluster centers (brain-shaped layout) ──
+  const clusterCenters = useMemo(() => {
+    if (!cd) return {} as Record<number, { x: number; y: number; z: number }>;
+    const ids = [...new Set(cd.nodes.map((n) => n.cluster))]
+      .filter((c) => c > 0)
+      .sort((a, b) => a - b);
+    const centers: Record<number, { x: number; y: number; z: number }> = {};
+    const Rx = 280,
+      Ry = 200,
+      Rz = 240;
+    const n = ids.length;
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    ids.forEach((cid, i) => {
+      const t = 1 - (2 * i) / Math.max(n - 1, 1);
+      const radius = Math.sqrt(1 - t * t);
+      const theta = goldenAngle * i;
+      centers[cid] = {
+        x: Math.cos(theta) * radius * Rx,
+        y: t * Ry,
+        z: Math.sin(theta) * radius * Rz,
+      };
+    });
+    centers[0] = { x: 0, y: 0, z: 0 };
+    return centers;
+  }, [cd]);
+
+  // ═══ GRAPH DATA — the core rendering logic ═══
+  const graphData = useMemo(() => {
+    if (!cd) return { nodes: [], links: [] };
+    const hasAct = Object.keys(nodeActMap).length > 0;
+    const playbackActive = isPlayback && hasAct;
+
+    let seed = 42;
+    const rand = () => {
+      seed = (seed * 16807 + 0) % 2147483647;
+      return seed / 2147483647 - 0.5;
+    };
+
+    const nodes = cd.nodes.map((n) => {
+      const c = ci(n.cluster || 0);
+      const act = nodeActMap[n.id] ?? 0;
+      const center = clusterCenters[n.cluster] ?? { x: 0, y: 0, z: 0 };
+      const jitter = n.is_hub ? 18 : 50;
+      const x = center.x + rand() * jitter;
+      const y = center.y + rand() * jitter;
+      const z = center.z + rand() * jitter;
+
+      let color: string;
+      let val: number;
+      let visible = true;
+
+      if (playbackActive) {
+        // ── LIVE INFERENCE: only active neurons glow, rest invisible ──
+        if (act > 0.3) {
+          color = CC_BRIGHT[c];
+          val = 3.5;
+        } else if (act > 0.05) {
+          color = CC[c];
+          val = 1.8;
+        } else {
+          color = CC_DIM[c];
+          val = 0.15;
+        } // near-invisible
+      } else if (hlCl !== null) {
+        // ── CLICK MODE: only selected cluster visible ──
+        if (n.cluster === hlCl) {
+          color = CC_BRIGHT[c];
+          val = n.is_hub ? 3.0 : 1.6;
+        } else {
+          color = "rgba(0,0,0,0)";
+          val = 0.001;
+          visible = false;
+        }
+      } else {
+        // ── DEFAULT: full brain visible, all clusters colored ──
+        color = CC[c];
+        val = n.is_hub ? 2.5 : 1.2;
+      }
+
+      return {
+        id: n.id,
+        cluster: n.cluster,
+        degree: n.degree,
+        is_hub: n.is_hub,
+        color,
+        val,
+        _visible: visible,
+        x,
+        y,
+        z,
+        fx: x,
+        fy: y,
+        fz: z,
+      };
+    });
+
+    const links = edges
+      ? cd.edges.map((e) => {
+          const sid =
+            typeof e.source === "object" ? (e.source as any).id : e.source;
+          const tid =
+            typeof e.target === "object" ? (e.target as any).id : e.target;
+          let linkVisible = true;
+          if (hlCl !== null && !playbackActive) {
+            const sc = nodeClMap[sid] ?? 0;
+            const tc = nodeClMap[tid] ?? 0;
+            linkVisible = sc === hlCl && tc === hlCl; // both endpoints must be in selected cluster
+          }
+          return {
+            source: sid,
+            target: tid,
+            same_cluster: e.same_cluster,
+            _visible: linkVisible,
+          };
+        })
+      : [];
+
+    return { nodes, links };
+  }, [cd, edges, nodeActMap, hlCl, isPlayback, nodeClMap, clusterCenters]);
+
+  // ── Link color ──
+  const linkColor = useCallback(
+    (link: any) => {
+      if (!link._visible) return "rgba(0,0,0,0)";
+      const sid =
+        typeof link.source === "object" ? link.source.id : link.source;
+      const tid =
+        typeof link.target === "object" ? link.target.id : link.target;
+      if (isPlayback && Object.keys(nodeActMap).length > 0) {
+        const sa = nodeActMap[sid] ?? 0;
+        const ta = nodeActMap[tid] ?? 0;
+        if (sa > 0.05 && ta > 0.05) {
+          const sc = nodeClMap[sid] ?? 0;
+          return `${CC[ci(sc)]}AA`;
+        }
+        return "rgba(15,15,20,0.02)";
+      }
+      if (hlCl !== null) {
+        const sc = nodeClMap[sid] ?? 0;
+        if (sc === hlCl && link.same_cluster) return `${CC[ci(sc)]}80`;
+        return "rgba(0,0,0,0)";
+      }
+      const sc = nodeClMap[sid] ?? 0;
+      if (link.same_cluster && sc > 0) return `${CC[ci(sc)]}40`;
+      return "rgba(80,80,110,0.18)";
+    },
+    [nodeClMap, isPlayback, nodeActMap, hlCl],
+  );
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      run();
+    }
+  };
+
+  // ── Stop playback and clear when clicking cluster during playback ──
+  const handleClusterClick = useCallback(
+    (cid: number) => {
+      if (isPlayback) {
+        // During playback, clicking a cluster stops it and selects that cluster
+        setPlaying(false);
+        setPIdx(-1);
+        setAr(null);
+        setHlCl(cid);
+        setExpCl((prev) => (prev === cid ? null : cid));
+      } else {
+        // Non-playback: toggle cluster highlight
+        setHlCl((prev) => (prev === cid ? null : cid));
+        setExpCl((prev) => (prev === cid ? null : cid));
+      }
+    },
+    [isPlayback],
+  );
+
+  // ═════════════════════════════════════════════════════════════════════
+  return (
+    <div
+      className="h-full flex flex-col lg:flex-row"
+      style={{ height: "100%", minHeight: 0 }}
+    >
+      {/* LEFT — graph + controls */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Header */}
+        <div className="px-5 pt-3 pb-0.5 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <Brain size={20} className="text-bdh-accent" />
+            <h1 className="text-xl font-bold">
+              <span className="gradient-text">Neural Graph</span> Explorer
+            </h1>
+          </div>
+          <p className="text-gray-600 text-[11px]">
+            G*=D<sub>x</sub>E neuron interaction graph · Louvain clusters ·
+            French model
+            {isPlayback && (
+              <span className="text-bdh-accent ml-2">
+                ● LIVE — watching the brain think
+              </span>
+            )}
+          </p>
+        </div>
+
+        {/* Controls */}
+        <div className="px-5 py-1.5 flex flex-wrap items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1">
+            <span className="text-[9px] text-gray-500 uppercase">Head</span>
+            {[0, 1, 2, 3].map((h) => (
+              <button
+                key={h}
+                onClick={() => setHead(h)}
+                className={`w-6 h-6 rounded text-[10px] font-mono font-bold ${head === h ? "bg-bdh-accent text-white" : "bg-gray-800 text-gray-500 hover:bg-gray-700"}`}
+              >
+                {h + 1}
+              </button>
+            ))}
+          </div>
+          <div className="w-px h-4 bg-gray-800" />
+          <div className="flex items-center gap-1 flex-1 max-w-[200px]">
+            <span className="text-[9px] text-gray-500">β</span>
+            <input
+              type="range"
+              min={0.01}
+              max={0.5}
+              step={0.005}
+              value={beta}
+              onChange={(e) => setBeta(parseFloat(e.target.value))}
+              className="flex-1 h-1 appearance-none rounded-full bg-gray-800
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
+                [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-bdh-accent [&::-webkit-slider-thumb]:cursor-pointer"
+            />
+            <span className="text-[9px] font-mono text-bdh-accent w-8 text-right">
+              {beta.toFixed(3)}
+            </span>
+          </div>
+          <div className="w-px h-4 bg-gray-800" />
+          <button
+            onClick={() => setEdges(!edges)}
+            className={`p-1 rounded ${edges ? "bg-gray-700 text-gray-200" : "bg-gray-800/50 text-gray-600"}`}
+          >
+            <Eye size={13} />
+          </button>
+          <button
+            onClick={() => {
+              gRef.current?.zoomToFit(600, 80);
+            }}
+            className="p-1 rounded bg-gray-800/50 text-gray-500 hover:bg-gray-700"
+          >
+            <RotateCcw size={13} />
+          </button>
+          {hlCl !== null && !isPlayback && (
+            <button
+              onClick={() => setHlCl(null)}
+              className="px-2 py-0.5 rounded text-[9px] bg-gray-700 text-gray-300 hover:bg-gray-600"
+            >
+              Show All
+            </button>
+          )}
+        </div>
+
+        {error && (
+          <div className="mx-5 mb-1 p-1.5 bg-red-500/10 border border-red-500/30 rounded text-red-300 text-[10px] flex items-center gap-1 flex-shrink-0">
+            <AlertCircle size={12} />
+            {error}
+            <button
+              onClick={() => setError(null)}
+              className="ml-auto text-red-400"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {cd &&
+          cd.beta_effective != null &&
+          Math.abs(cd.beta_effective - beta) > 0.001 && (
+            <div className="mx-5 mb-1 p-1.5 bg-yellow-500/10 border border-yellow-500/30 rounded text-yellow-300 text-[10px] flex items-center gap-1 flex-shrink-0">
+              <Info size={12} />
+              <span>
+                β auto-adjusted: {beta.toFixed(3)} →{" "}
+                {cd.beta_effective.toFixed(3)} for visibility
+              </span>
+              <button
+                onClick={() => setBeta(cd.beta_effective!)}
+                className="ml-auto text-yellow-400 text-[9px] underline"
+              >
+                Apply
+              </button>
+            </div>
+          )}
+
+        {/* ── 3D Graph ── */}
+        <div
+          ref={containerRef}
+          className="flex-1 relative mx-5 mb-1.5 rounded-xl overflow-hidden border border-gray-800/40 bg-[#07070c]"
+        >
+          {loading ? (
+            <div className="absolute inset-0 flex items-center justify-center z-10">
+              <Loader2 className="w-7 h-7 text-bdh-accent animate-spin" />
+            </div>
+          ) : graphData.nodes.length > 0 ? (
+            <ForceGraph3D
+              ref={gRef}
+              graphData={graphData}
+              width={dims.width}
+              height={dims.height}
+              nodeColor="color"
+              nodeVal="val"
+              nodeRelSize={4}
+              nodeVisibility="_visible"
+              linkColor={linkColor}
+              linkOpacity={0.6}
+              linkWidth={0.15}
+              linkVisibility="_visible"
+              backgroundColor="#07070c"
+              enableNodeDrag={false}
+              controlType="orbit"
+              nodeLabel={(n: any) =>
+                `#${n.id} C${n.cluster} D${n.degree}${n.is_hub ? " HUB" : ""}`
+              }
+              onNodeClick={(n: any) => handleClusterClick(n.cluster)}
+              onBackgroundClick={() => {
+                if (!isPlayback) setHlCl(null);
+              }}
+              onEngineStop={handleEngineStop}
+              d3AlphaDecay={0.1}
+              d3VelocityDecay={0.6}
+              warmupTicks={0}
+              cooldownTicks={1}
+            />
+          ) : (
+            !loading && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <p className="text-gray-700 text-[10px]">
+                  No data — start the backend
+                </p>
+              </div>
+            )
+          )}
+
+          {/* Overlay stats */}
+          {cd && !loading && (
+            <div className="absolute top-2 left-2 flex gap-1 pointer-events-none">
+              <div className="px-1.5 py-0.5 rounded bg-black/60 text-[8px] font-mono text-gray-500">
+                {cd.n_display_nodes}n·{cd.n_display_edges}e
+              </div>
+              <div className="px-1.5 py-0.5 rounded bg-black/60 text-[8px] font-mono text-bdh-accent/80">
+                {cd.num_clusters}cl Q={cd.modularity.toFixed(3)}
+              </div>
+            </div>
+          )}
+
+          {/* Token bar during playback */}
+          {curTok && ar && (
+            <div className="absolute bottom-1.5 left-2 right-2 pointer-events-none">
+              <div className="px-2 py-1.5 rounded-lg bg-black/80 backdrop-blur flex items-center gap-0.5 overflow-x-auto">
+                <span className="text-[7px] text-gray-600 mr-1 flex-shrink-0 uppercase">
+                  Token
+                </span>
+                {ar.input_chars.map((ch, i) => (
+                  <span
+                    key={i}
+                    className={`px-0.5 text-[10px] font-mono rounded flex-shrink-0 transition-all duration-300 ${
+                      i === pIdx
+                        ? "bg-bdh-accent text-white px-1.5 py-0.5 scale-110"
+                        : i < pIdx
+                          ? "text-gray-500"
+                          : "text-gray-700"
+                    }`}
+                  >
+                    {ch}
+                  </span>
+                ))}
+                {(() => {
+                  const total = cd?.nodes.length ?? 0;
+                  const firing =
+                    total > 0
+                      ? cd!.nodes.filter((n) => (nodeActMap[n.id] ?? 0) > 0.05)
+                          .length
+                      : 0;
+                  const pct =
+                    total > 0 ? ((1 - firing / total) * 100).toFixed(0) : "—";
+                  return (
+                    <span className="ml-auto text-[7px] text-bdh-accent/70 flex-shrink-0 whitespace-nowrap">
+                      {firing}/{total} fire · {pct}% sparse
+                    </span>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Inference input ── */}
+        <div className="px-5 pb-3 flex-shrink-0">
+          <div className="glass-card p-2">
+            <div className="flex items-center gap-1 mb-1">
+              <Zap size={11} className="text-bdh-accent" />
+              <span className="text-[9px] font-semibold text-gray-400">
+                Live Inference — type text, watch the brain think
+              </span>
+              {ar && (
+                <div className="ml-auto flex gap-0.5">
+                  <button
+                    onClick={() => {
+                      setPIdx(0);
+                      setPlaying(true);
+                    }}
+                    className="p-0.5 rounded bg-gray-800 text-gray-500 hover:text-gray-300"
+                  >
+                    <RotateCcw size={9} />
+                  </button>
+                  <button
+                    onClick={() => setPlaying(!playing)}
+                    className={`p-0.5 rounded ${playing ? "bg-bdh-accent/20 text-bdh-accent" : "bg-gray-800 text-gray-500"}`}
+                  >
+                    {playing ? <Pause size={9} /> : <Play size={9} />}
+                  </button>
+                  <button
+                    onClick={() =>
+                      setPIdx((p) => Math.min(p + 1, (ar?.num_tokens || 1) - 1))
+                    }
+                    className="p-0.5 rounded bg-gray-800 text-gray-500 hover:text-gray-300"
+                  >
+                    <SkipForward size={9} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPlaying(false);
+                      setPIdx(-1);
+                      setAr(null);
+                      setHlCl(null);
+                    }}
+                    className="p-0.5 rounded bg-gray-800 text-gray-500 hover:text-gray-300"
+                  >
+                    <Square size={9} />
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={onKey}
+                placeholder="e.g. The price in euros was 50 francs"
+                className="input-field flex-1 text-[10px] !py-1.5"
+              />
+              <select
+                value={layer}
+                onChange={(e) => setLayer(+e.target.value)}
+                className="px-1 rounded bg-gray-800 border border-gray-700 text-[8px] text-gray-400"
+              >
+                <option value={-1}>All</option>
+                {[0, 1, 2, 3, 4, 5, 6, 7].map((l) => (
+                  <option key={l} value={l}>
+                    L{l}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={run}
+                disabled={activating || !text.trim()}
+                className="btn-primary flex items-center gap-1 text-[9px] disabled:opacity-40 !py-1 !px-2.5"
+              >
+                {activating ? (
+                  <Loader2 size={11} className="animate-spin" />
+                ) : (
+                  <Send size={11} />
+                )}{" "}
+                Run
+              </button>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-1">
+              {[
+                "The price in euros was 50 francs",
+                "Germany and France signed the treaty",
+                "Le dollar américain",
+                "The European Parliament",
+                "le changement climatique menace",
+              ].map((ex) => (
+                <button
+                  key={ex}
+                  onClick={() => setText(ex)}
+                  className="px-1 py-0.5 text-[7px] bg-gray-800/40 hover:bg-gray-700 rounded text-gray-600 hover:text-gray-400 truncate max-w-[150px]"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── RIGHT SIDEBAR ── */}
+      <aside className="w-60 lg:w-68 border-l border-gray-800/50 bg-gray-900/30 flex flex-col overflow-hidden flex-shrink-0">
+        <div className="p-2 border-b border-gray-800/50 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <h2 className="text-[9px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+              <Activity size={9} className="text-bdh-accent" /> Clusters
+            </h2>
+            {cd && (
+              <span className="text-[7px] font-mono text-gray-700">
+                {cd.n_neurons.toLocaleString()}n
+              </span>
+            )}
+          </div>
+          {curTok && (
+            <div className="mt-1 px-1.5 py-1 rounded bg-bdh-accent/10 border border-bdh-accent/20">
+              <div className="text-[7px] text-bdh-accent/60 uppercase">
+                Token {curTok.token_idx + 1}/{ar?.num_tokens}
+              </div>
+              <div className="text-sm font-mono text-white">
+                '{curTok.char}'
+              </div>
+              <div className="text-[7px] text-gray-500 mt-0.5">
+                {activeClusters.size} cluster
+                {activeClusters.size !== 1 ? "s" : ""} active
+              </div>
+            </div>
+          )}
+          {hlCl !== null && !isPlayback && (
+            <div
+              className="mt-1 px-1.5 py-1 rounded border border-gray-700"
+              style={{
+                borderColor: CC[ci(hlCl)] + "40",
+                backgroundColor: CC[ci(hlCl)] + "08",
+              }}
+            >
+              <div
+                className="text-[7px] uppercase"
+                style={{ color: CC[ci(hlCl)] }}
+              >
+                Selected Cluster
+              </div>
+              <div className="text-sm font-mono text-white">
+                {cd?.clusters.find((c) => c.cluster_id === hlCl)?.label ||
+                  `Cluster ${hlCl}`}
+              </div>
+            </div>
+          )}
+        </div>
+        {cd && (
+          <div className="px-2 flex-shrink-0">
+            <Hist data={cd.histogram} beta={beta} />
+          </div>
+        )}
+        <div className="flex-1 overflow-y-auto px-2 py-1 space-y-0.5">
+          {cd?.clusters
+            .filter((c) => c.cluster_id > 0)
+            .map((c) => (
+              <Pill
+                key={c.cluster_id}
+                c={c}
+                act={
+                  curMap[c.cluster_id] ??
+                  (ar
+                    ? (ar.cumulative_cluster_activations.find(
+                        (x) => x.cluster_id === c.cluster_id,
+                      )?.normalized ?? 0)
+                    : 0)
+                }
+                blink={blinkIds.has(c.cluster_id)}
+                open={expCl === c.cluster_id}
+                selected={hlCl === c.cluster_id && !isPlayback}
+                dimmed={
+                  (isPlayback &&
+                    activeClusters.size > 0 &&
+                    !activeClusters.has(c.cluster_id)) ||
+                  (hlCl !== null && !isPlayback && hlCl !== c.cluster_id)
+                }
+                onClick={() => handleClusterClick(c.cluster_id)}
+              />
+            ))}
+          {cd?.clusters.find((c) => c.cluster_id === 0) && (
+            <div className="pt-0.5 border-t border-gray-800/40 text-[7px] text-gray-700 flex items-center gap-0.5">
+              <Info size={7} />{" "}
+              {cd.clusters.find((c) => c.cluster_id === 0)?.neuron_count}{" "}
+              isolated
+            </div>
+          )}
+        </div>
+        <div className="p-2 border-t border-gray-800/50 bg-gray-950/50 flex-shrink-0">
+          <p className="text-[8px] text-gray-600">
+            Head {head + 1}/4 · β={beta.toFixed(3)}
+            {cd?.beta_effective != null &&
+              Math.abs(cd.beta_effective - beta) > 0.001 && (
+                <span className="text-yellow-500">
+                  {" "}
+                  → eff={cd.beta_effective.toFixed(3)}
+                </span>
+              )}
+          </p>
+          <p className="text-[7px] text-gray-700 mt-0.5">
+            Click cluster to isolate · Enter text to watch brain activate
+          </p>
+        </div>
+      </aside>
+    </div>
+  );
+}

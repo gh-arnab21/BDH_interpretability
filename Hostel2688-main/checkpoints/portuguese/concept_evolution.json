@@ -1,0 +1,16 @@
+{
+  "concepts": {
+    "currencies": [],
+    "countries": [],
+    "languages": [],
+    "numbers": [],
+    "months": []
+  },
+  "available_concepts": [
+    "currencies",
+    "countries",
+    "languages",
+    "numbers",
+    "months"
+  ]
+}

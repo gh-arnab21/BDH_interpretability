@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+venv/
+.env/
+.env
+
+# Node / frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.vite/
+frontend/.vite/
+
+# Models (hosted on HF Spaces, not in Git)
+*.pt
+*.pth
+*.ckpt
+
+# Redundant checkpoint dump
+changed_checkpoints_data/
+
+# OS junk
+.DS_Store
+Thumbs.db
+*.log
+
+# Editor
+.vscode/
+.idea/
+
+# Keys
+default
+default.pub
+
+# HF upload helpers (keep locally, not needed in repo)
+upload_to_hf.py
+hf_space_README.md

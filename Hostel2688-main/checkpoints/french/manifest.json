@@ -1,0 +1,31 @@
+{
+  "model_name": "french",
+  "num_checkpoints": 17,
+  "checkpoint_files": [
+    "viz_data_000500.json",
+    "viz_data_001000.json",
+    "viz_data_001500.json",
+    "viz_data_002000.json",
+    "viz_data_002500.json",
+    "viz_data_003000.json",
+    "viz_data_003500.json",
+    "viz_data_004000.json",
+    "viz_data_004500.json",
+    "viz_data_005000.json",
+    "viz_data_006000.json",
+    "viz_data_006500.json",
+    "viz_data_007000.json",
+    "viz_data_007500.json",
+    "viz_data_008000.json",
+    "viz_data_008500.json",
+    "viz_data_009500.json"
+  ],
+  "config": {},
+  "files": {
+    "evolution_timeline": "evolution_timeline.json",
+    "keyframe_summary": "keyframe_summary.json",
+    "concept_evolution": "concept_evolution.json"
+  },
+  "data_format_version": "1.0",
+  "has_full_checkpoints": false
+}

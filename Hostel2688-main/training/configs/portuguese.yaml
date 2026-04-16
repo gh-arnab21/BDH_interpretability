@@ -1,0 +1,41 @@
+# BDH Training Configuration: Portuguese Specialist
+# Train on English-Portuguese Europarl data
+# ARCHITECTURE MUST MATCH FRENCH EXACTLY FOR MERGING!
+
+# Data paths
+train_data: "data/en-pt/train.bin"
+val_data: "data/en-pt/val.bin"
+
+# Model architecture — MUST match French model!
+n_layer: 6
+n_embd: 192
+n_head: 4
+mlp_multiplier: 64 # N = 192 * 64 / 4 = 3072 neurons per head
+dropout: 0.1
+vocab_size: 256 # UTF-8 bytes
+
+# Training hyperparameters
+batch_size: 16
+block_size: 256
+max_iters: 5000
+learning_rate: 1.0e-3
+min_lr: 1.0e-4
+warmup_iters: 500
+weight_decay: 0.1
+grad_clip: 1.0
+gradient_accumulation_steps: 8
+
+# Logging and checkpointing
+log_interval: 100
+eval_interval: 500
+save_interval: 2500
+eval_iters: 100
+
+# Output
+output_dir: "checkpoints"
+run_name: "portuguese"
+
+# Device settings
+device: "cuda"
+dtype: "bfloat16"
+compile_model: false

@@ -1,0 +1,50 @@
+# BDH Training Configuration: French Specialist
+# Train on English-French Europarl data
+
+# Data paths
+train_data: "data/en-fr/train.bin"
+val_data: "data/en-fr/val.bin"
+
+# Model architecture
+# Reduced for 6GB GPU
+n_layer: 6
+n_embd: 192
+n_head: 4
+mlp_multiplier: 64 # Reduced from 128
+dropout: 0.1
+vocab_size: 256 # UTF-8 bytes
+
+# Training hyperparameters
+batch_size: 16 # Increased for better GPU utilization
+block_size: 256 # Reduced from 512
+max_iters: 5000 # Reduced for faster demo training
+learning_rate: 1.0e-3
+min_lr: 1.0e-4
+warmup_iters: 500
+weight_decay: 0.1
+grad_clip: 1.0
+gradient_accumulation_steps: 8 # Effective batch = 128
+
+# Effective batch size = 32 * 4 = 128 sequences
+# Tokens per iteration = 128 * 512 = 65,536
+# Total tokens = 15,000 * 65,536 ≈ 983M tokens
+
+# Logging and checkpointing
+log_interval: 100
+eval_interval: 500
+save_interval: 2500
+eval_iters: 100
+
+# Output
+output_dir: "checkpoints"
+run_name: "french"
+
+# Device settings
+device: "cuda"
+dtype: "bfloat16"
+compile_model: false # Triton not available on Windows
+
+
+# Optional: Weights & Biases logging
+# wandb_project: "bdh-interpretability"
+# wandb_run_name: "french_specialist"

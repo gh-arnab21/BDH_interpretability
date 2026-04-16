@@ -1,0 +1,506 @@
+"""
+Graph Brain API — Fully Performance Optimized
+
+Bottleneck fixes:
+1. G* computed once per (model,head), cached as numpy
+2. Edge filtering 100% vectorized — zero Python loops on millions of entries
+3. Louvain fed via scipy.sparse CSR matrix (10-50x faster than add_edges_from)
+4. Display edges capped at 800 (WebGL limit for smooth 60fps)
+5. Display nodes capped at 200
+6. Histogram sampled from pre-cached G*
+7. Activation endpoint uses precomputed cluster masks
+"""
+
+import json
+import time
+from typing import Dict, Any
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
+from pydantic import BaseModel, Field
+import torch
+import numpy as np
+
+router = APIRouter()
+
+MAX_VIZ_NODES = 800
+MAX_VIZ_EDGES = 800
+MAX_LOUVAIN_EDGES = 100_000
+
+
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer): return int(obj)
+        if isinstance(obj, np.floating): return float(obj)
+        if isinstance(obj, np.ndarray): return obj.tolist()
+        if isinstance(obj, np.bool_): return bool(obj)
+        return super().default(obj)
+
+
+def SafeJSON(content: Any, status_code: int = 200) -> Response:
+    return Response(content=json.dumps(content, cls=NumpyEncoder),
+                    status_code=status_code, media_type="application/json")
+
+
+class ActivateRequest(BaseModel):
+    text: str
+    model_name: str = "french"
+    head: int = 0
+    layer: int = -1
+
+
+# ── Caches ──────────────────────────────────────────────────────────────
+_gstar: Dict[str, np.ndarray] = {}
+_clusters: Dict[str, Dict] = {}
+_v1_models: Dict[str, Any] = {}   # V1 model cache for graph viz
+_v1_configs: Dict[str, Any] = {}
+_precomputed_labels: Dict[str, Dict] = {}  # head -> cluster_id -> label info
+
+
+def _load_precomputed_labels():
+    """Load cluster labels from precomputed JSON if available."""
+    if _precomputed_labels:
+        return  # Already loaded
+    from pathlib import Path
+    p = Path(__file__).parent.parent.parent / "frontend" / "public" / "graph" / "precomputed_clusters.json"
+    if not p.exists():
+        print("[GRAPH] No precomputed_clusters.json found — labels will be None")
+        return
+    try:
+        data = json.loads(p.read_text())
+        for hkey, hdata in data.get("heads", {}).items():
+            head = hdata.get("head", 0)
+            labels = hdata.get("cluster_labels", {})
+            _precomputed_labels[str(head)] = labels
+        print(f"[GRAPH] Loaded precomputed labels for {len(_precomputed_labels)} heads")
+    except Exception as e:
+        print(f"[GRAPH] Failed to load precomputed labels: {e}")
+
+
+def _apply_labels(meta: list, head: int):
+    """Apply precomputed semantic labels to cluster metadata."""
+    _load_precomputed_labels()
+    labels = _precomputed_labels.get(str(head), {})
+    if not labels:
+        return
+    for m in meta:
+        cid = str(m["cluster_id"])
+        if cid in labels:
+            info = labels[cid]
+            m["label"] = info.get("label", m.get("label"))
+            m["label_confidence"] = info.get("confidence", 0)
+            m["top_trigger_words"] = info.get("all_scores", {})
+            if isinstance(m["top_trigger_words"], dict):
+                m["top_trigger_words"] = list(m["top_trigger_words"].keys())[:3]
+
+
+def _gk(m: str, h: int) -> str: return f"{m}_{h}"
+def _ck(m: str, h: int, b: float) -> str: return f"{m}_{h}_{b:.4f}"
+
+
+def _get_v1_model(model_name: str, svc):
+    """Load the V1 model (french_model.pt) for graph visualization.
+    The V1 model has model.encoder / model.decoder (not ParameterLists).
+    This produces the correct G* matrix that the graph was designed around."""
+    if model_name in _v1_models:
+        return _v1_models[model_name], _v1_configs[model_name]
+    from pathlib import Path
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "training"))
+    from bdh import BDH, BDHConfig
+    v1_path = Path(svc.checkpoint_dir) / model_name / f"{model_name}_model.pt"
+    if not v1_path.exists():
+        # Fallback: use whatever the service has
+        return svc.get_or_load(model_name), svc.get_config(model_name)
+    ckpt = torch.load(str(v1_path), map_location=svc.device, weights_only=False)
+    cfg = BDHConfig(**ckpt["config"]) if "config" in ckpt else svc.get_config(model_name)
+    state = ckpt.get("model_state_dict", ckpt)
+    # Strip _orig_mod. prefix from compiled models
+    state = {k.replace("_orig_mod.", ""): v for k, v in state.items()}
+    model = BDH(cfg)
+    model.load_state_dict(state)
+    model.to(svc.device)
+    model.eval()
+    _v1_models[model_name] = model
+    _v1_configs[model_name] = cfg
+    print(f"[GRAPH] Loaded V1 model from {v1_path.name}: {cfg.n_layer}L {cfg.n_embd}D {cfg.n_head}H N={cfg.n_neurons}")
+    return model, cfg
+
+
+def get_gstar(model, cfg, head: int, mname: str) -> np.ndarray:
+    k = _gk(mname, head)
+    if k not in _gstar:
+        t = time.perf_counter()
+        nh, N, D = cfg.n_head, cfg.n_neurons, cfg.n_embd
+        with torch.no_grad():
+            d = model.decoder.view(nh, N, D)
+            _gstar[k] = (d[head] @ model.encoder[head]).cpu().numpy().astype(np.float32)
+        print(f"[GRAPH] G* head={head} {time.perf_counter()-t:.2f}s N={N}")
+    return _gstar[k]
+
+
+# ── Core clustering ─────────────────────────────────────────────────────
+
+def compute(G: np.ndarray, N: int, beta: float):
+    t0 = time.perf_counter()
+
+    # ── Adaptive beta: auto-lower if user's beta yields too few edges ──
+    beta_eff = beta
+    above_test = int((G >= beta).sum())
+    min_edges_needed = max(N, 100)
+    if above_test < min_edges_needed:
+        pos = G.ravel()
+        pos = pos[pos > 0]
+        if len(pos) > 0:
+            for pct in [99.5, 99, 98, 97, 95, 90, 85, 80]:
+                candidate = float(np.percentile(pos, pct))
+                if int((G >= candidate).sum()) >= min_edges_needed:
+                    beta_eff = candidate
+                    break
+            else:
+                beta_eff = float(np.median(pos))
+            print(f"[GRAPH] Adaptive β: user={beta:.4f} → eff={beta_eff:.4f} "
+                  f"(user produced {above_test} edges, need ≥{min_edges_needed})")
+
+    # 1) Threshold — fully vectorized, no Python loop
+    above = G >= beta_eff
+    ei, ej = np.nonzero(above)
+    ew = G[ei, ej]
+    ne = len(ei)
+
+    out_deg = above.sum(1)
+    in_deg = above.sum(0)
+    tot_deg = out_deg + in_deg
+
+    t1 = time.perf_counter()
+
+    # 2) Louvain — use scipy sparse, much faster than networkx edge list
+    labels = np.zeros(N, dtype=np.int32)
+    modul = 0.0
+    ncl = 1
+
+    try:
+        from scipy.sparse import csr_matrix
+        try:
+            import community as community_louvain
+        except ImportError:
+            import community.community_louvain as community_louvain
+        import networkx as nx
+
+        # If too many edges, keep only the strongest
+        if ne > MAX_LOUVAIN_EDGES:
+            topk = np.argpartition(ew, -MAX_LOUVAIN_EDGES)[-MAX_LOUVAIN_EDGES:]
+            li, lj, lw = ei[topk], ej[topk], ew[topk]
+        else:
+            li, lj, lw = ei, ej, ew
+
+        # Build sparse symmetric matrix -> networkx Graph
+        sp = csr_matrix((lw, (li, lj)), shape=(N, N))
+        sp = sp + sp.T  # symmetrize for undirected
+        G_nx = nx.from_scipy_sparse_array(sp, edge_attribute='weight')
+
+        # Remove isolates
+        isolates = list(nx.isolates(G_nx))
+        G_nx.remove_nodes_from(isolates)
+
+        if G_nx.number_of_nodes() > 20:
+            part = community_louvain.best_partition(G_nx, random_state=42)
+            modul = community_louvain.modularity(part, G_nx)
+            for nd, cid in part.items():
+                labels[nd] = cid + 1
+            ncl = max(part.values()) + 1
+        else:
+            for nd in G_nx.nodes():
+                labels[nd] = 1
+
+    except ImportError:
+        # Degree-based fallback
+        if (tot_deg > 0).any():
+            p = np.percentile(tot_deg[tot_deg > 0], [20, 40, 60, 80])
+            for i in range(N):
+                if tot_deg[i] <= 0: labels[i] = 0
+                elif tot_deg[i] <= p[0]: labels[i] = 1
+                elif tot_deg[i] <= p[1]: labels[i] = 2
+                elif tot_deg[i] <= p[2]: labels[i] = 3
+                else: labels[i] = 4
+            ncl = 4
+
+    t2 = time.perf_counter()
+
+    # 3) Cluster metadata — vectorized
+    meta = []
+    for cid in range(ncl + 1):
+        cm = labels == cid
+        cnt = int(cm.sum())
+        if cnt == 0: continue
+        mems = np.where(cm)[0]
+        top3 = mems[np.argsort(tot_deg[mems])[-3:][::-1]]
+        meta.append({
+            "cluster_id": int(cid), "neuron_count": cnt,
+            "avg_out_degree": round(float(out_deg[cm].mean()), 1),
+            "avg_in_degree": round(float(in_deg[cm].mean()), 1),
+            "internal_edges": 0, "internal_weight": 0.0,
+            "hub_neurons": [{"neuron": int(x), "degree": int(tot_deg[x])} for x in top3 if tot_deg[x] > 0],
+            "label": None,
+        })
+
+    # 4) Subsample nodes — vectorized
+    active = np.where(tot_deg > 0)[0]
+    if len(active) < 20:
+        # Min-node guarantee: expand using top nodes by G* row magnitude
+        row_mag = np.abs(G).sum(axis=1)
+        fallback_idx = np.argsort(row_mag)[-20:]
+        active = np.unique(np.concatenate([active, fallback_idx]))
+        for ni in fallback_idx:
+            if labels[ni] == 0:
+                labels[ni] = 1
+        if ncl < 1:
+            ncl = 1
+        print(f"[GRAPH] Min-node guarantee: expanded to {len(active)} active nodes")
+    if len(active) == 0:
+        return _empty_result(N, beta_eff, ncl, modul, meta, labels)
+
+    hub_thr = np.percentile(tot_deg[active], 93) if len(active) > 20 else 0
+    hubs = set(active[tot_deg[active] >= max(hub_thr, 1)].tolist())
+    picked = set(hubs)
+
+    # ── Guarantee at least 1 representative per cluster ──
+    # Small clusters often have 0 nodes in the edge graph; pick their
+    # highest-G*-magnitude neuron so every cluster is represented visually.
+    row_mag = np.abs(G).sum(axis=1)
+    for cid in range(1, ncl + 1):
+        cmems = np.where(labels == cid)[0]
+        if len(cmems) == 0:
+            continue
+        # Check if this cluster already has a node picked
+        if any(n in picked for n in cmems):
+            continue
+        # Pick the neuron with highest G* row magnitude from this cluster
+        best = cmems[np.argmax(row_mag[cmems])]
+        picked.add(int(best))
+
+    budget = MAX_VIZ_NODES - len(picked)
+
+    if budget > 0:
+        non_hub = active[~np.isin(active, list(hubs))]
+        non_hub_labeled = non_hub[labels[non_hub] > 0]
+        if len(non_hub_labeled) <= budget:
+            picked.update(non_hub_labeled.tolist())
+        else:
+            # Stratified sample by cluster
+            for cid in range(1, ncl + 1):
+                cmems = non_hub_labeled[labels[non_hub_labeled] == cid]
+                q = max(1, int(budget * len(cmems) / max(len(non_hub_labeled), 1)))
+                if len(cmems) <= q:
+                    picked.update(cmems.tolist())
+                else:
+                    top = cmems[np.argsort(tot_deg[cmems])[-q:]]
+                    picked.update(top.tolist())
+
+    slist = sorted(picked)
+    sset = set(slist)
+
+    nodes = [{"id": int(n), "cluster": int(labels[n]), "degree": int(tot_deg[n]),
+              "is_hub": n in hubs} for n in slist]
+
+    # 5) Display edges — FULLY VECTORIZED: mask both endpoints in sampled set
+    sset_arr = np.array(slist)
+    in_src = np.isin(ei, sset_arr)
+    in_tgt = np.isin(ej, sset_arr)
+    both = in_src & in_tgt
+    ce_i, ce_j, ce_w = ei[both], ej[both], ew[both]
+
+    # Same-cluster flag vectorized
+    ce_sc = (labels[ce_i] == labels[ce_j]) & (labels[ce_i] > 0)
+
+    # Sort: same_cluster first, then weight desc — pick top MAX_VIZ_EDGES
+    order = np.lexsort((-ce_w, ~ce_sc))  # ~ce_sc: False (same) before True (cross)
+    order = order[:MAX_VIZ_EDGES]
+
+    edges = [{"source": int(ce_i[k]), "target": int(ce_j[k]),
+              "weight": round(float(ce_w[k]), 2), "same_cluster": bool(ce_sc[k])}
+             for k in order]
+
+    t3 = time.perf_counter()
+
+    # 6) Histogram — cheap, sampled
+    flat = G.ravel()
+    ridx = np.random.RandomState(42).choice(len(flat), min(200_000, len(flat)), replace=False)
+    fs = flat[ridx]
+    hr = (float(fs.min()), float(min(fs.max(), beta * 5 + 0.3)))
+    hc, he = np.histogram(fs, bins=50, range=hr)
+    hist = [{"x": round(float((he[i]+he[i+1])/2), 4), "y": int(hc[i])} for i in range(len(hc))]
+
+    print(f"[GRAPH] β={beta:.3f} eff={beta_eff:.4f} thr={t1-t0:.2f}s louv={t2-t1:.2f}s viz={t3-t2:.2f}s tot={t3-t0:.2f}s | raw_e={ne} cl={ncl} show={len(nodes)}n/{len(edges)}e")
+
+    return {
+        "beta": float(beta), "beta_effective": float(beta_eff),
+        "n_neurons": int(N), "n_total_edges": int(ne),
+        "n_display_nodes": len(nodes), "n_display_edges": len(edges),
+        "num_clusters": ncl, "modularity": round(float(modul), 4),
+        "density": round(float(ne / max(N*N, 1)), 6),
+        "nodes": nodes, "edges": edges,
+        "clusters": sorted(meta, key=lambda c: -c["neuron_count"]),
+        "histogram": hist, "_labels": labels,
+    }
+
+
+def _empty_result(N, beta, ncl, modul, meta, labels):
+    return {"beta": float(beta), "beta_effective": float(beta),
+            "n_neurons": int(N), "n_total_edges": 0,
+            "n_display_nodes": 0, "n_display_edges": 0,
+            "num_clusters": ncl, "modularity": round(float(modul), 4),
+            "density": 0, "nodes": [], "edges": [],
+            "clusters": meta, "histogram": [], "_labels": labels}
+
+
+# ── Endpoints ───────────────────────────────────────────────────────────
+
+@router.get("/clusters/{model_name}")
+def get_clusters(model_name: str, req: Request, head: int = 0, beta: float = 0.1, max_nodes: int = MAX_VIZ_NODES):
+    svc = req.app.state.model_service
+    try:
+        model, cfg = _get_v1_model(model_name, svc)
+    except Exception as e:
+        raise HTTPException(404, str(e))
+    if head < 0 or head >= cfg.n_head:
+        raise HTTPException(400, f"head must be 0-{cfg.n_head-1}")
+
+    ck = _ck(model_name, head, beta)
+    if ck not in _clusters:
+        G = get_gstar(model, cfg, head, model_name)
+        r = compute(G, cfg.n_neurons, beta)
+        r["model_name"] = model_name; r["head"] = head
+        _clusters[ck] = r
+
+    c = _clusters[ck]
+    # Apply precomputed semantic labels
+    _apply_labels(c.get("clusters", []), head)
+    return SafeJSON({k: v for k, v in c.items() if not k.startswith("_")})
+
+
+@router.post("/activate")
+def activate(request: ActivateRequest, req: Request):
+    svc = req.app.state.model_service
+    try:
+        model, cfg = _get_v1_model(request.model_name, svc)
+    except Exception as e:
+        raise HTTPException(404, str(e))
+
+    h, ly = request.head, request.layer
+
+    # Get cached labels
+    cd = None
+    for bt in [0.02, 0.05, 0.01, 0.1, 0.03]:
+        k = _ck(request.model_name, h, bt)
+        if k in _clusters: cd = _clusters[k]; break
+    if cd is None:
+        G = get_gstar(model, cfg, h, request.model_name)
+        cd = compute(G, cfg.n_neurons, 0.02)
+        cd["model_name"] = request.model_name; cd["head"] = h
+        _clusters[_ck(request.model_name, h, 0.02)] = cd
+
+    labels = cd["_labels"]
+    ncl = cd["num_clusters"]
+    N = cfg.n_neurons
+
+    # Precompute cluster masks once
+    cmasks = {}
+    for cid in range(ncl + 1):
+        m = labels == cid
+        if m.any(): cmasks[cid] = m
+
+    # Inference
+    import sys; from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "training"))
+    from bdh import ExtractionConfig
+
+    toks = torch.tensor([list(request.text.encode("utf-8"))], dtype=torch.long, device=svc.device)
+    T = toks.shape[1]
+
+    with torch.no_grad():
+        with model.extraction_mode(ExtractionConfig(
+            capture_sparse_activations=True, capture_attention_patterns=False,
+            capture_pre_relu=False, capture_layer_outputs=False)) as buf:
+            model(toks)
+
+    layers = sorted(buf.x_sparse.keys())
+    if ly >= 0 and ly in buf.x_sparse: layers = [ly]
+
+    # Stack activations: (T, N)
+    act = np.zeros((T, N), dtype=np.float32)
+    for li in layers:
+        act += buf.x_sparse[li][0, h].cpu().numpy()
+
+    tb = toks[0].cpu().tolist()
+    chars = [chr(b) if 32 <= b < 127 else f"\\x{b:02x}" for b in tb]
+
+    # Per-token cluster activations + per-neuron activations for display nodes
+    # Use MEAN activation per neuron (not sum) to avoid big-cluster bias
+    # Also compute sparsity_ratio = fraction of neurons active in cluster
+    display_ids = set(nd["id"] for nd in cd["nodes"])  # Only display nodes
+    per_tok = []
+    cumul = np.zeros(N, dtype=np.float32)
+    for ti in range(T):
+        row = act[ti]
+        cumul += row
+        tcl = []
+        mx_mean = 0.0
+        for cid, cm in cmasks.items():
+            cluster_acts = row[cm]
+            n_neurons = int(cm.sum())
+            total = float(cluster_acts.sum())
+            mean_act = total / max(n_neurons, 1)
+            active_count = int((cluster_acts > 0).sum())
+            sparsity_ratio = active_count / max(n_neurons, 1)
+            if mean_act > mx_mean: mx_mean = mean_act
+            tcl.append({"cluster_id": cid, "activation": round(total, 2),
+                        "mean_activation": round(mean_act, 4),
+                        "active_neurons": active_count,
+                        "cluster_size": n_neurons,
+                        "sparsity_ratio": round(sparsity_ratio, 4)})
+        for x in tcl:
+            x["normalized"] = round(x["mean_activation"] / max(mx_mean, 1e-6), 4)
+
+        # Per-neuron activations for display nodes (sparse: only nonzero)
+        tok_node_act = {}
+        row_max = float(row.max()) if row.max() > 0 else 1.0
+        for nid in display_ids:
+            v = float(row[nid])
+            if v > 0:
+                tok_node_act[str(nid)] = round(v / row_max, 4)
+
+        per_tok.append({"token_idx": ti, "byte": tb[ti], "char": chars[ti],
+                        "cluster_activations": sorted(tcl, key=lambda c: -c["mean_activation"]),
+                        "node_activations": tok_node_act})
+
+    # Node overlay
+    mx_c = float(cumul.max()) if cumul.max() > 0 else 1.0
+    na = {}
+    for nd in cd["nodes"]:
+        v = float(cumul[nd["id"]])
+        if v > 0: na[str(nd["id"])] = round(v / mx_c, 4)
+
+    # Cumulative
+    cc = []
+    mx_cc = 0.0
+    for cid, cm in cmasks.items():
+        t = float(cumul[cm].sum())
+        if t > mx_cc: mx_cc = t
+        cc.append({"cluster_id": cid, "total_activation": round(t, 2),
+                   "active_neurons": int((cumul[cm] > 0).sum())})
+    for x in cc:
+        x["normalized"] = round(x["total_activation"] / max(mx_cc, 1e-6), 4)
+
+    return SafeJSON({
+        "input_text": request.text, "input_chars": chars, "num_tokens": T,
+        "head": h, "layer": ly, "layers_used": [int(l) for l in layers],
+        "per_token": per_tok,
+        "cumulative_cluster_activations": sorted(cc, key=lambda c: -c["total_activation"]),
+        "node_activations": na,
+    })
+
+
+@router.delete("/cache")
+async def clear_cache():
+    _gstar.clear(); _clusters.clear(); _v1_models.clear(); _v1_configs.clear()
+    return {"status": "cleared"}

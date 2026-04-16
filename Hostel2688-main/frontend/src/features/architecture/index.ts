@@ -1,0 +1,1 @@
+export { BDHArchitectureDiagram } from './BDHArchitectureDiagram'

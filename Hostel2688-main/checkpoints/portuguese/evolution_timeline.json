@@ -1,0 +1,109 @@
+{
+  "timeline": [
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_000500",
+      "file": "viz_data_000500.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_001000",
+      "file": "viz_data_001000.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_002000",
+      "file": "viz_data_002000.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_003000",
+      "file": "viz_data_003000.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_004000",
+      "file": "viz_data_004000.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_004500",
+      "file": "viz_data_004500.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_005000",
+      "file": "viz_data_005000.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_005500",
+      "file": "viz_data_005500.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_006000",
+      "file": "viz_data_006000.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_006500",
+      "file": "viz_data_006500.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_007000",
+      "file": "viz_data_007000.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_007500",
+      "file": "viz_data_007500.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_008000",
+      "file": "viz_data_008000.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_008500",
+      "file": "viz_data_008500.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_009500",
+      "file": "viz_data_009500.json"
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_010000",
+      "file": "viz_data_010000.json"
+    }
+  ],
+  "num_checkpoints": 16,
+  "iterations": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "metrics": [
+    "sparsity",
+    "x_sparsity",
+    "y_sparsity",
+    "graph_density"
+  ]
+}

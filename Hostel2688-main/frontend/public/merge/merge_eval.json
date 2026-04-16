@@ -1,0 +1,25 @@
+{
+  "evaluation": {
+    "merged": {
+      "fr_data": 3276.83,
+      "pt_data": 3613.6104
+    }
+  },
+  "heritage": {
+    "model_a": "checkpoints/french/best.pt",
+    "model_b": "checkpoints/portuguese/best.pt",
+    "neurons_a": 12288,
+    "neurons_b": 12288,
+    "total": 24576
+  },
+  "samples": [
+    {
+      "prompt": "<F:en>The European Parliament<T:fr>",
+      "output": "<F:en>The European Parliament<T:fr>iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii"
+    },
+    {
+      "prompt": "<F:en>The European Parliament<T:pt>",
+      "output": "<F:en>The European Parliament<T:pt>iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii"
+    }
+  ]
+}

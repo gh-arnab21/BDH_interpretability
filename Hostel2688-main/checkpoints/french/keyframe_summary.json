@@ -1,0 +1,84 @@
+{
+  "keyframes": [
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_000500",
+      "sparsity": {},
+      "graph": {}
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_001000",
+      "sparsity": {},
+      "graph": {}
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_001500",
+      "sparsity": {},
+      "graph": {}
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_002000",
+      "sparsity": {},
+      "graph": {}
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_002500",
+      "sparsity": {},
+      "graph": {}
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_003000",
+      "sparsity": {},
+      "graph": {}
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_003500",
+      "sparsity": {},
+      "graph": {}
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_004000",
+      "sparsity": {},
+      "graph": {}
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_004500",
+      "sparsity": {},
+      "graph": {}
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_005000",
+      "sparsity": {},
+      "graph": {}
+    },
+    {
+      "iteration": 0,
+      "checkpoint": "viz_data_009500",
+      "sparsity": {},
+      "graph": {}
+    }
+  ],
+  "num_keyframes": 11,
+  "iterations": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ]
+}

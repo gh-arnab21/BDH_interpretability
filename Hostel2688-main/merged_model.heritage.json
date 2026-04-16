@@ -1,0 +1,18 @@
+{
+  "model1_name": "french",
+  "model2_name": "portuguese",
+  "neurons_per_head_original": 3072,
+  "neurons_per_head_merged": 6144,
+  "total_neurons_per_model": 12288,
+  "total_neurons_merged": 24576,
+  "ranges": {
+    "french": {
+      "start": 0,
+      "end": 3071
+    },
+    "portuguese": {
+      "start": 3072,
+      "end": 6143
+    }
+  }
+}

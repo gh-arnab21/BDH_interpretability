@@ -1,0 +1,39 @@
+# BDH Interpretability Suite - Python Dependencies
+
+# Core ML
+torch>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Data Processing
+datasets>=2.14.0  # HuggingFace datasets for Europarl
+pandas>=2.0.0
+tqdm>=4.65.0
+
+# API
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+orjson>=3.9.0
+pydantic>=2.0.0
+python-multipart>=0.0.6
+
+# Analysis & Visualization
+networkx>=3.1
+python-louvain>=0.16
+scikit-learn>=1.3.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Utilities
+pyyaml>=6.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Development
+pytest>=7.4.0
+black>=23.0.0
+isort>=5.12.0
+
+# Optional: For Colab/Jupyter
+ipywidgets>=8.0.0
+jupyter>=1.0.0
